@@ -1,7 +1,10 @@
 import os
 import serial
 import time
-from homie.device_switch import Device_Switch
+from homie.device_base import Device_Base
+from homie.node.node_base import Node_Base
+
+from homie.node.property.property_switch import Property_Switch
 
 # Get MQTT broker configuration from environment variables
 
@@ -12,8 +15,8 @@ mqtt_settings = {
     'MQTT_PASSWORD' : os.environ.get("MQTT_BROKER_PASS", None)
 }
 
-device_id = os.environ.get("MQTT_DEVICE_ID", "usb-relay02")
-device_name = os.environ.get("MQTT_DEVICE_NAME", "USB Relay02")
+device_id = os.environ.get("MQTT_DEVICE_ID", "rly02")
+device_name = os.environ.get("MQTT_DEVICE_NAME", "USB Relay RLY-02")
 
 ser_port = os.environ.get("RELAY_DEVICE", "/dev/ttyRELAY")
 mqtt_publish_interval = os.environ.get("MQTT_PUBLISH_INTERVAL", 120)
@@ -22,8 +25,8 @@ mqtt_publish_interval = os.environ.get("MQTT_PUBLISH_INTERVAL", 120)
 def control_relay(serial_port, relay_number, action):
     # Map relay numbers to command bytes
     relay_commands = {
-        1: 0x65 if action == "on" else (0x6F if action == "off" else 0x5B),
-        2: 0x66 if action == "on" else (0x70 if action == "off" else 0x5B),
+        1: 0x65 if action == "ON" else (0x6F if action == "OFF" else 0x5B),
+        2: 0x66 if action == "ON" else (0x70 if action == "OFF" else 0x5B),
     }
 
     try:
@@ -51,30 +54,39 @@ def control_relay(serial_port, relay_number, action):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 
-class My_Relay(Device_Switch):
+class USB_Relay(Device_Base):
     def __init__(
-        self, relay_index=1, device_id=None, name=None, homie_settings=None, mqtt_settings=None
+        self,
+        device_id=None,
+        name=None,
+        homie_settings=None,
+        mqtt_settings=None,
     ):
-        self.relay_index = relay_index
-        super().__init__(device_id=device_id, name=name, homie_settings=homie_settings, mqtt_settings=mqtt_settings)
-        
-    def set_switch(self, onoff):
-        if onoff == 'on' or onoff == '1' or onoff == 'ON' or onoff == 'true':
-            action = 'on'
-        else:
-            action = 'off'
 
-        control_relay(ser_port, self.relay_index, action)
-        super().set_switch(onoff)
+        super().__init__(device_id, name, homie_settings, mqtt_settings)
+
+        node = Node_Base(self, "controls", "Controls", "controls")
+        self.node = node
+        self.add_node(node)
+
+        self.relay1 = Property_Switch(self.node, id="port01", name="Relay Port 1", set_value=lambda newVal: control_relay(ser_port, 1, newVal))
+        self.node.add_property(self.relay1)
+        self.relay2 = Property_Switch(self.node, id="port02", name="Relay Port 2", set_value=lambda newVal: control_relay(ser_port, 2, newVal))
+        self.node.add_property(self.relay2)
+
+        self.start()    
+
+    def update(self):
+        self.relay1.value = control_relay(ser_port, 1, "query")
+        self.relay2.value = control_relay(ser_port, 2, "query")
+
 
 def main():
 
-    relay1 = My_Relay(relay_index=1, name=f"{device_name}-1", device_id=f"{device_id}-1", mqtt_settings=mqtt_settings)
-    relay2 = My_Relay(relay_index=2, name=f"{device_name}-2", device_id=f"{device_id}-2", mqtt_settings=mqtt_settings)
+    relay = USB_Relay(name=device_name, device_id=device_id, mqtt_settings=mqtt_settings)
 
     while True:
-        relay1.update_switch(control_relay(ser_port, 1, "query"))
-        relay2.update_switch(control_relay(ser_port, 2, "query"))
+        relay.update()
         time.sleep(mqtt_publish_interval)
 
 if __name__ == "__main__":
